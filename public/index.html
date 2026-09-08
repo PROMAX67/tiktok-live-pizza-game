@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>TikTok LIVE Pizza Game</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#05070d;font-family:Arial,sans-serif}
+#game{position:fixed;inset:0;background:linear-gradient(#57b9ff,#176eb5 48%,#061b40);overflow:hidden}
+canvas{position:absolute;inset:0;width:100%;height:100%}
+.top{position:absolute;top:max(10px,env(safe-area-inset-top));left:12px;right:12px;display:flex;justify-content:space-between;z-index:5;color:#fff}
+.badge{background:#171923dd;border-radius:18px;padding:9px 13px;font-weight:800;font-size:14px}
+.win{position:absolute;top:64px;left:50%;transform:translateX(-50%);color:#fff;font-size:22px;font-weight:900;text-shadow:0 2px 4px #000;z-index:5}
+.status{position:absolute;top:108px;left:10px;background:#111c;color:#fff;border-radius:12px;padding:7px 10px;font-size:12px;z-index:5}
+.progress{position:absolute;bottom:92px;left:10%;right:10%;height:44px;border:3px solid #222;border-radius:10px;background:#17310e;z-index:5;overflow:hidden}
+.bar{height:100%;width:0%;background:linear-gradient(#66ff22,#18c900)}
+.ptxt{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:21px;font-weight:900;text-shadow:0 2px 3px #000}
+.controls{position:absolute;bottom:20px;left:0;right:0;display:flex;justify-content:center;gap:8px;z-index:6}
+button{border:0;border-radius:16px;padding:12px 14px;background:#fff;color:#111;font-weight:900;font-size:14px;box-shadow:0 4px 12px #0006}
+button:active{transform:scale(.94)}
+.toast{position:absolute;top:145px;left:50%;transform:translateX(-50%);background:#000c;color:#fff;border-radius:20px;padding:10px 18px;font-weight:900;opacity:0;transition:.2s;z-index:20;white-space:nowrap}
+.toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div id="game">
+<canvas id="c"></canvas>
+<div class="top"><div class="badge">🎮 Gaming Ranking</div><div class="badge">LIVE 🔴</div></div>
+<div class="win" id="win">WIN = 0 / 10</div>
+<div class="status" id="status">⚪ غير متصل</div>
+<div class="progress"><div class="bar" id="bar"></div><div class="ptxt" id="ptxt">1 / 5000</div></div>
+<div class="controls">
+<button onclick="localCmd('up50')">🌹 UP 50</button>
+<button onclick="jump()">⬆️ قفز</button>
+<button onclick="localCmd('down50')">🎵 DOWN 50</button>
+</div>
+<div class="toast" id="toast"></div>
+</div>
+
+<script>
+const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
+let W=innerWidth,H=innerHeight,D=devicePixelRatio||1;
+
+function resize(){
+W=innerWidth;
+H=innerHeight;
+D=Math.min(devicePixelRatio||1,2);
+canvas.width=W*D;
+canvas.height=H*D;
+canvas.style.width=W+'px';
+canvas.style.height=H+'px';
+ctx.setTransform(D,0,0,D,0,0)
+}
+
+addEventListener('resize',resize);
+resize();
+
+let stage=1,wins=0,player={x:0,y:0,vy:0},jumping=false,playerZ=0,toastTimer=0;
+let platforms=[];
+
+function makePlatforms(){
+platforms=[];
+for(let i=0;i<45;i++)
+platforms.push({
+x:(i%3-1)*1.5+Math.sin(i*.9)*.5,
+z:i*3.1+4,
+rot:(i%2)*.08
+})
+}
+
+makePlatforms();
+
+function project(x,z){
+const horizon=H*.47;
+const depth=Math.max(.15,1-(z-playerZ)/75);
+return{
+x:W/2+x*125*depth,
+y:horizon+(z-playerZ)*2*depth,
+s:70*depth
+}
+}
+
+function drawSky(){
+let g=ctx.createLinearGradient(0,0,0,H);
+g.addColorStop(0,'#73c8ff');
+g.addColorStop(.52,'#268bd1');
+g.addColorStop(1,'#061e45');
+ctx.fillStyle=g;
+ctx.fillRect(0,0,W,H);
+
+ctx.globalAlpha=.2;
+for(let i=0;i<35;i++){
+ctx.fillStyle='#fff';
+ctx.beginPath();
+ctx.arc((i*97)%W,(i*53)%H,1.5+i%3,0,Math.PI*2);
+ctx.fill()
+}
+ctx.globalAlpha=1;
+
+ctx.fillStyle='#0a3e75';
+ctx.beginPath();
+ctx.ellipse(W/2,H*.83,W*.78,H*.33,0,Math.PI,Math.PI*2);
+ctx.fill();
+}
+
+function pizza(p){
+const q=project(p.x,p.z);
+if(q.y>H+100||q.y<100)return;
+
+ctx.save();
+ctx.translate(q.x,q.y);
+ctx.rotate(p.rot);
+
+ctx.fillStyle='#8e4b1c';
+ctx.beginPath();
+ctx.ellipse(0,5,q.s*.82,q.s*.35,0,0,Math.PI*2);
+ctx.fill();
+
+ctx.fillStyle='#e99b42';
+ctx.beginPath();
+ctx.ellipse(0,0,q.s*.78,q.s*.34,0,0,Math.PI*2);
+ctx.fill();
+
+ctx.fillStyle='#e5b24d';
+ctx.beginPath();
+ctx.ellipse(0,-2,q.s*.66,q.s*.27,0,0,Math.PI*2);
+ctx.fill();
+
+for(let i=0;i<7;i++){
+let a=i*Math.PI*2/7,
+x=Math.cos(a)*q.s*.38,
+y=Math.sin(a)*q.s*.13;
+
+ctx.fillStyle='#b62b24';
+ctx.beginPath();
+ctx.ellipse(x,y,q.s*.09,q.s*.055,0,0,Math.PI*2);
+ctx.fill()
+}
+
+ctx.fillStyle='#fff';
+ctx.font=`900 ${Math.max(10,q.s*.25)}px Arial`;
+ctx.textAlign='center';
+ctx.strokeStyle='#111';
+ctx.lineWidth=3;
+ctx.strokeText(p.num,0,q.s*.08);
+ctx.fillText(p.num,0,q.s*.08);
+
+ctx.restore()
+}
+
+function drawPlayer(){
+const x=W/2+player.x*90,
+y=H*.48-player.y*75;
+
+ctx.save();
+ctx.translate(x,y);
+
+ctx.fillStyle='#fff7';
+ctx.beginPath();
+ctx.arc(0,5,28,0,Math.PI*2);
+ctx.fill();
+
+ctx.fillStyle='#222';
+ctx.beginPath();
+ctx.arc(0,-20,12,0,Math.PI*2);
+ctx.fill();
+
+ctx.fillStyle='#eee';
+ctx.fillRect(-9,-8,18,25);
+
+ctx.strokeStyle='#111';
+ctx.lineWidth=5;
+ctx.beginPath();
+ctx.moveTo(-5,17);
+ctx.lineTo(-13,35);
+ctx.moveTo(5,17);
+ctx.lineTo(13,35);
+ctx.moveTo(-8,0);
+ctx.lineTo(-23,12);
+ctx.moveTo(8,0);
+ctx.lineTo(23,12);
+ctx.stroke();
+
+ctx.restore()
+}
+
+function draw(){
+drawSky();
+
+platforms
+.map((p,i)=>({...p,num:stage+i}))
+.sort((a,b)=>b.z-a.z)
+.forEach(pizza);
+
+drawPlayer()
+}
+
+function jump(){
+if(!jumping){
+jumping=true;
+player.vy=.9
+}
+}
+
+function toast(t){
+let e=document.getElementById('toast');
+e.textContent=t;
+e.classList.add('show');
+clearTimeout(toastTimer);
+toastTimer=setTimeout(()=>e.classList.remove('show'),900)
+}
+
+function updateUI(){
+document.getElementById('win').textContent=`WIN = ${wins} / 10`;
+document.getElementById('ptxt').textContent=`${stage} / 5000`;
+document.getElementById('bar').style.width=(stage/5000*100)+'%'
+}
+
+function localCmd(c){
+applyCommand(c,true)
+}
+
+function applyCommand(c,local=false){
+
+if(c==='up50'){
+stage=Math.min(5000,stage+50);
+toast('🌹 UP 50')
+}
+
+if(c==='down50'){
+stage=Math.max(1,stage-50);
+toast('🎵 DOWN 50')
+}
+
+if(c==='up500'){
+stage=Math.min(5000,stage+500);
+toast('🌹 UP 500')
+}
+
+if(c==='down500'){
+stage=Math.max(1,stage-500);
+toast('🎁 DOWN 500')
+}
+
+if(c==='up5000'){
+stage=5000;
+toast('🚀 UP 5000')
+}
+
+if(c==='win'){
+wins=(wins+1)%11;
+toast('🏆 WIN!')
+}
+
+updateUI()
+}
+
+function connect(){
+
+const proto=location.protocol==='https:'?'wss:':'ws:';
+const ws=new WebSocket(proto+'//'+location.host);
+
+ws.onopen=()=>{
+document.getElementById('status').textContent='🟢 TikTok LIVE متصل'
+};
+
+ws.onclose=()=>{
+document.getElementById('status').textContent='🔴 الاتصال انقطع';
+setTimeout(connect,3000)
+};
+
+ws.onerror=()=>{
+document.getElementById('status').textContent='🟠 خطأ اتصال'
+};
+
+ws.onmessage=e=>{
+try{
+const m=JSON.parse(e.data);
+
+if(m.type==='command')
+applyCommand(m.command);
+
+if(m.type==='status')
+document.getElementById('status').textContent=
+m.connected?'🟢 TikTok LIVE متصل':'⚪ غير متصل';
+
+if(m.type==='gift')
+toast('🎁 '+m.gift)
+
+}catch(_){}
+}
+}
+
+addEventListener('keydown',e=>{
+if(e.key==='ArrowUp'||e.key===' ')
+jump();
+
+if(e.key==='u')localCmd('up50');
+if(e.key==='d')localCmd('down50');
+if(e.key==='i')localCmd('up500');
+if(e.key==='k')localCmd('down500');
+if(e.key==='o')localCmd('up5000');
+if(e.key==='w')localCmd('win')
+});
+
+canvas.addEventListener('pointerdown',e=>{
+if(e.clientY<H-120)
+jump()
+});
+
+function loop(){
+
+if(jumping){
+player.y+=player.vy;
+player.vy-=.075;
+
+if(player.y<=0){
+player.y=0;
+player.vy=0;
+jumping=false
+}
+}
+
+playerZ+=.045;
+
+if(playerZ>platforms[platforms.length-1].z-5){
+playerZ=0;
+makePlatforms()
+}
+
+draw();
+requestAnimationFrame(loop)
+}
+
+updateUI();
+connect();
+loop();
+</script>
+</body>
+</html>
